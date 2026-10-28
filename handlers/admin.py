@@ -6099,6 +6099,38 @@ async def _send_broadcast_rich(bot, target_chat_id: int, source: types.Message):
     # فورواردشده از کانال که دکمه‌ی نامعتبر/مخصوص ربات دیگر دارند و باعث رد شدن
     # کل کپی می‌شد و پیام با ایموجی معمولی ارسال می‌گشت)  ۳) fallback دستی.
     _first_exc = None
+    # 💎 اگر پیام ایموجی پرمیوم (custom_emoji) دارد، copyMessage گاهی (مخصوصاً برای پیام فورواردشده از کانال)
+    # آن را به ایموجی عادی تبدیل می‌کند؛ پس اول با ارسال مستقیم + entityهای اصلی می‌فرستیم
+    # (همان مسیری که بقیه‌ی پیام‌های پرمیوم ربات با آن درست کار می‌کنند) و فقط در صورت خطا به copyMessage برمی‌گردیم.
+    _ents = list(source.entities or source.caption_entities or [])
+    if any(getattr(e, "type", None) == "custom_emoji" for e in _ents):
+        _direct = None
+        for _mk in ([source.reply_markup, None] if source.reply_markup else [None]):
+          try:
+              if source.text is not None:
+                  _direct = await bot.send_message(int(target_chat_id), source.text, entities=_ents, parse_mode=None,
+                                                   reply_markup=_mk, _skip_auto_text=True)
+              elif source.photo:
+                  _direct = await bot.send_photo(int(target_chat_id), source.photo[-1].file_id, caption=source.caption,
+                                                 caption_entities=_ents, parse_mode=None, reply_markup=_mk)
+              elif source.video:
+                  _direct = await bot.send_video(int(target_chat_id), source.video.file_id, caption=source.caption,
+                                                 caption_entities=_ents, parse_mode=None, reply_markup=_mk)
+              elif source.animation:
+                  _direct = await bot.send_animation(int(target_chat_id), source.animation.file_id, caption=source.caption,
+                                                     caption_entities=_ents, parse_mode=None, reply_markup=_mk)
+              elif source.document:
+                  _direct = await bot.send_document(int(target_chat_id), source.document.file_id, caption=source.caption,
+                                                    caption_entities=_ents, parse_mode=None, reply_markup=_mk)
+              if _direct is not None:
+                  break
+          except (TelegramForbiddenError, TelegramRetryAfter):
+              raise
+          except Exception:
+              logger.warning("broadcast: ارسال مستقیم با entity ناموفق بود؛ تلاش با copyMessage", exc_info=True)
+              _direct = None
+        if _direct is not None:
+            return _direct
     try:
         # ۱) همیشه اول «بدون reply_markup» کپی می‌کنیم؛ این دقیقاً همان مسیری است که ایموجی پرمیوم را کامل
         #    نگه می‌دارد. (قبلاً وقتی زیر پیام فورواردی دکمه بود، کپی همراه دکمه انجام می‌شد و ایموجی‌ها عادی می‌شدند.)
